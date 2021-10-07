@@ -2,45 +2,45 @@ const fs = require('fs');
 const cheerio = require('cheerio');
 const request = require('sync-request');
 const minimist = require('minimist')
-var argv = minimist(process.argv.slice(2));
 let type = 'npm'
 let page_to_search = 1;
 let out_file = 'log.dat';
 let sep = undefined
 let write_headers = false
-let page_start = 1
+let start_page = 1
 // parse args
-if (argv['type'] != undefined)
-    type = argv['type']
-if (argv['page_count'] != undefined)
-    page_to_search = Number(argv['page_count'])
-if (argv['out'] != undefined)
-    out_file = argv['out']
-if (argv['sep'] != undefined)
-    sep = argv['sep']
-if (argv['start_page'] != undefined)
-    start_page = Number(argv['start_page'])
-
-var logStream = fs.createWriteStream(out_file, {flags: 'w'});
-if (argv['write_headers']) {
-    logStream.write("Severity" + sep + "CVE" + sep + "Vulnerability" + sep + "Plugin URL" + sep +
-        "Affected Plugin" + sep + "Plugin Version" + sep + "Database" + sep + "Discovery Date" + sep + "#Page\n")
+function parse_args(argv) {
+    if (argv['type'] != undefined)
+        type = argv['type']
+    if (argv['page_count'] != undefined)
+        page_to_search = Number(argv['page_count'])
+    if (argv['out'] != undefined)
+        out_file = argv['out']
+    if (argv['sep'] != undefined)
+        sep = argv['sep']
+    if (argv['start_page'] != undefined)
+        start_page = Number(argv['start_page'])
+    log_stream = fs.createWriteStream(out_file, {flags: 'w'});
+    if (argv['write_headers']) {
+        log_stream.write("Severity" + sep + "CVE" + sep + "Vulnerability" + sep + "Plugin URL" + sep +
+            "Affected Plugin" + sep + "Affected Version" + sep + "Database" + sep + "Discovery Date" + sep + "#Page\n")
+    }
 }
 
 function write_entry(obj) {
     if (sep == undefined) 
-        logStream.write(JSON.stringify(obj) + '\n')
+        log_stream.write(JSON.stringify(obj) + '\n')
     else 
-        logStream.write(obj.severity + sep + obj.vuln_url + sep + obj.type + sep + obj.plugin_url +
+        log_stream.write(obj.severity + sep + obj.vuln_url + sep + obj.type + sep + obj.plugin_url +
             sep + obj.affected_plugin + sep + '"' + obj.plugin_version + '"' +
             sep + obj.database + sep + '"' + obj.discovery_date + '"' + sep + obj.page + '\n')
 }
 
+// parse a page
 function parse_page(pn, t) {
     let url = 'https://snyk.io/vuln/page/' + pn + '?type=' + t;
-    // start to iterate the pages
     var req = request('GET', url)
-    console.log("Checking:", url)
+    console.log("Parsing:", url)
     const $ = cheerio.load(req.body);
     $('.table--comfortable > tbody:nth-child(2)').each(function () {
         var children = $(this).children();
@@ -66,12 +66,17 @@ function parse_page(pn, t) {
     });
 }
 
+// start parsing all the pages
 function parse_all_pages(sp, p2s, t) {
     let page_num = sp;
+    // parse until we hit the requested number of pages
     while (page_num < p2s) {
         parse_page(page_num, t)
         page_num++;
     }
 }
+
+let argv = minimist(process.argv.slice(2));
+parse_args(argv)
 parse_all_pages(start_page, page_to_search + start_page, type)
 console.log("Parsing completed");
