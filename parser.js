@@ -2,6 +2,11 @@ const fs = require('fs');
 const cheerio = require('cheerio');
 const request = require('sync-request');
 const minimist = require('minimist')
+const today = new Date();
+// get date for the output file
+const day = today.getDate();
+const month = today.getMonth()
+const year = today.getFullYear();
 let type = 'npm'
 let page_to_search = 1;
 let out_file = 'log.dat';
@@ -20,6 +25,8 @@ function parse_args(argv) {
         sep = argv['sep']
     if (argv['start_page'] != undefined)
         start_page = Number(argv['start_page'])
+    // write the current date at the log
+    out_file = day + '-' + month + '-' + year + '_' + out_file
     log_stream = fs.createWriteStream(out_file, {flags: 'w'});
     if (argv['write_headers']) {
         log_stream.write("Severity" + sep + "CVE" + sep + "Vulnerability" + sep + "Plugin URL" + sep +
