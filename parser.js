@@ -4,33 +4,13 @@ const request = require('sync-request');
 const minimist = require('minimist')
 const get_dependencies = require('get-dependencies');
 const print = console.log
-const PackageDependents = require("package-dependents");
+const check = require('check-npm-dependents');
 
-let db_url = 'https://npmjs.com/package/'
-let index = 0
 // dependants
 let deps_count = {};
 let exploit_count = new Map();
 let dependencies_count = {};
 let objs = []
-
-let counter = 0;
-const nameSet = new Set();
-
-// Get package dependents
-function getDependents (name) {
-  PackageDependents(name).then(packages => {
-    packages.forEach(c => {
-      // If the name has not appear again increase the counter
-      if (!nameSet.has(c.name)){
-        nameSet.add(c.name);
-        counter++;
-        getDependents(c.name);
-      }
-    })
-  })
-}
-
 
 // parse args
 function parse_args(argv) {
@@ -40,9 +20,10 @@ function parse_args(argv) {
     start_page = Number(argv['start_page']) || 1
     sep = argv['sep'] || ','
     log_stream = fs.createWriteStream(out_file, {flags: 'w'});
-    log_stream.write("Severity" + sep + "CVE" + sep + "Vulnerability" + sep + "Plugin URL" + sep +
-        "Affected Plugin" + sep + "Affected Version" + sep + "Database" + sep + "Discovery Date" 
-        + sep + "#Dependents" + sep + "#Page" + sep + "Id" + sep + "C_BUG" + sep + "Dependencies\n")
+    if (!argv['wo_headers'])
+        log_stream.write("Severity" + sep + "CVE" + sep + "Vulnerability" + sep + "Plugin URL" + sep +
+            "Affected Plugin" + sep + "Affected Version" + sep + "Database" + sep + "Discovery Date" 
+            + sep + "#Dependents" + sep + "#Page" + sep + "Id" + sep + "C_BUG" + sep + "Dependencies\n")
     filters = {}
     filters.exploit = argv['exploit']
     filters.version = argv['version']
@@ -73,19 +54,7 @@ function write_entry(obj) {
     log_stream.write(obj.severity + sep + obj.vuln_url + sep + obj.exploit + sep + obj.plugin_url +
         sep + obj.pkg_name + sep + '"' + obj.version + '"' +
         sep + obj.database + sep + '"' + obj.discovery_date + '"' + sep + 
-        obj.dependents + sep + obj.page + sep + obj.id +  sep + obj.c_bug + sep + obj.dependencies +'\n')
-}
-
-// fetch the dependents if they do not exist in the hashmap
-function get_dependents(pkg_name) {
-    // if the package exists, fetch it
-    if (deps_count[pkg_name] !== undefined)
-        return deps_count[pkg_name]
-    // else perform a request and fetch it
-    counter = 0
-    getDependents('"' + pkg_name + '"')
-    deps_count[pkg_name] = counter
-    return counter
+        obj.dependents + sep + obj.page + sep + obj.c_bug + sep + obj.dependencies +'\n')
 }
 
 async function dependencies(pkg_name) {
@@ -100,7 +69,7 @@ async function dependencies(pkg_name) {
 
 let todo_tasks = 0
 let total_tasks = 0
-function iterate_child($, ctx, child, pn, index) {
+function iterate_child($, ctx, child, pn) {
     let obj = {}
     var fields = $(ctx).children();
     let b0 = $(fields[0]).find('a')
@@ -114,29 +83,54 @@ function iterate_child($, ctx, child, pn, index) {
     obj.database        = $(fields[2]).text().trim()
     obj.discovery_date  = $(fields[3]).text().trim()
     obj.page            = pn
-    obj.id = index
     todo_tasks++
     total_tasks++
     dependencies(obj.pkg_name).then(function(result) {
         // find dependents
-        obj.dependents = get_dependents(obj.pkg_name)
-        // calculate count of exploits 
-        exploit_count.set(obj.exploit, (exploit_count.get(obj.exploit) +1) || 1)
-        // find dependencies
-        obj.dependencies = dependencies_count[obj.pkg_name] || '"' + result + '"'
-        dependencies_count[obj.pkg_name] = obj.dependencies
-        obj.c_bug = 'no'
-        if (result.indexOf('nan') != -1)
-            obj.c_bug = 'nan'
-        else if (result.indexOf('napi-macros') != -1)
-            obj.c_bug = 'napi-macros'
-        else if (result.indexOf('node-addon-api') != -1)
-            obj.c_bug = 'node-addon-api'
-        write_entry(obj)
-        todo_tasks--
-        // are we done?
-        if (todo_tasks === 0)
-            finish()       
+        dependents = async function(pkg_name) {
+            //await new Promise(resolve => setTimeout(resolve, stop));
+            let res = check(pkg_name).then(function(e){
+                return e
+            })
+            .catch(function(e) {
+                print(pkg_name)
+                res = "Error-invalid-pkg"
+            })
+            return res
+        }
+        let counter = 0
+        if (deps_count[obj.pkg_name] !== undefined){
+            obj.dependents = deps_count[obj.pkg_name]
+            move_on()
+        } else {
+            // find dependents
+            dependents(obj.pkg_name).then(function(e) {
+                if (e === undefined)
+                    e = "Error-invalid-pkg"
+                obj.dependents = e
+                deps_count[obj.pkg_name] = e
+                move_on()
+            })
+        }
+        function move_on() {
+            // calculate count of exploits 
+            exploit_count.set(obj.exploit, (exploit_count.get(obj.exploit) +1) || 1)
+            // find dependencies
+            obj.dependencies = dependencies_count[obj.pkg_name] || '"' + result + '"'
+            dependencies_count[obj.pkg_name] = obj.dependencies
+            obj.c_bug = 'no'
+            if (result.indexOf('nan') != -1)
+                obj.c_bug = 'nan'
+            else if (result.indexOf('napi-macros') != -1)
+                obj.c_bug = 'napi-macros'
+            else if (result.indexOf('node-addon-api') != -1)
+                obj.c_bug = 'node-addon-api'
+            write_entry(obj)
+            todo_tasks--
+            // are we done?
+            if (todo_tasks === 0)
+                finish()       
+        }
     })
 }
 
@@ -145,7 +139,7 @@ function iterate_children($, children, pn) {
     for (let i = 0; i < len; i++) {
         //get the child
         $(children[i]).each(function () {
-            iterate_child($, this, children[i], pn, index++)
+            iterate_child($, this, children[i], pn)
         })
     }
 }
@@ -177,13 +171,13 @@ if (filters.length === 0)
 print("Applying filters:", JSON.stringify(filters))
 parse_all_pages(start_page, page_to_search + start_page, type)
 function finish() {
-    log_stream.write("\nPrinting Stats")
-    let ec = new Map([...exploit_count.entries()].sort((a, b) => b[1] - a[1]));
-    for (let i of ec.entries()) {
-        var num = i[1] / total_tasks * 100
-        let s = String("\n" + i[0] + ' ' + parseFloat(num).toFixed(4) + "%")
-        //console.log(s)
-        log_stream.write(s)
-    }
-    log_stream.end()
+//    log_stream.write("\nPrinting Stats")
+//    let ec = new Map([...exploit_count.entries()].sort((a, b) => b[1] - a[1]));
+//    for (let i of ec.entries()) {
+//        var num = i[1] / total_tasks * 100
+//        let s = String("\n" + i[0] + ' ' + parseFloat(num).toFixed(4) + "%")
+//        //console.log(s)
+//        log_stream.write(s)
+//    }
+//    log_stream.end()
 }
