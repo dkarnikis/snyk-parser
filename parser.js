@@ -60,23 +60,24 @@ function write_entry(obj) {
 function get_dependents(pkg_name) {
     var db_req = request('GET', db_url + pkg_name)
     const db_xd = cheerio.load(db_req.body)
-    return db_xd('#package-tab-dependents > span:nth-child(1)').text().replace(',', '').replace("Dependents", "")
+    let dat = db_xd('#package-tab-dependents > span:nth-child(1)').text()//.replace(',', '').replace("Dependents", "")
+    if (dat === '') {
+        return "UNDEFINED PKG"
+    }
+    return dat
 }
 
-function dependencies(pkg_name) {
+async function dependencies(pkg_name) {
     let res = "Failed to fetch deps"
     try {
-        res = get_dependencies.getByName(pkg_name).then(function(result) {
-            return result
-        });
+        res = await get_dependencies.getByName(pkg_name)
     } 
     catch (error) {
-        print("Error")
     }
     return res
 }
 
-async function iterate_child($, ctx, child, pn, index) {
+function iterate_child($, ctx, child, pn, index) {
     let obj = {}
     var fields = $(ctx).children();
     let b0 = $(fields[0]).find('a')
@@ -91,10 +92,10 @@ async function iterate_child($, ctx, child, pn, index) {
     obj.discovery_date  = $(fields[3]).text().trim()
     obj.page            = pn
     obj.id = index
-    obj.dependents = deps_count[obj.pkg_name] || get_dependents(obj.pkg_name)
-    deps_count[obj.pkg_name] = obj.dependents
-    exploit_count[obj.exploit] = (exploit_count[obj.exploit] +1) || 1
     dependencies(obj.pkg_name).then(function(result) {
+        obj.dependents = deps_count[obj.pkg_name] || get_dependents(obj.pkg_name)
+        deps_count[obj.pkg_name] = obj.dependents
+        //exploit_count[obj.exploit] = (exploit_count[obj.exploit] +1) || 1
         obj.dependencies = dependencies_count[obj.pkg_name] || '"' + result + '"'
         dependencies_count[obj.pkg_name] = obj.dependencies
         obj.c_bug = 'no'
@@ -146,6 +147,6 @@ if (filters.length === 0)
 print("Applying filters:", JSON.stringify(filters))
 parse_all_pages(start_page, page_to_search + start_page, type)
 console.log("Parsing completed");
-for (let i in exploit_count) {
-    print(i +":" + exploit_count[i])
-}
+//for (let i in exploit_count) {
+//    print(i +":" + exploit_count[i])
+//}
