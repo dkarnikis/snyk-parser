@@ -4,14 +4,34 @@ const request = require('sync-request');
 const minimist = require('minimist')
 const get_dependencies = require('get-dependencies');
 const print = console.log
+const PackageDependents = require("package-dependents");
 
 let db_url = 'https://npmjs.com/package/'
 let index = 0
 // dependants
 let deps_count = {};
-let exploit_count = {};
+let exploit_count = new Map();
 let dependencies_count = {};
 let objs = []
+
+let counter = 0;
+const nameSet = new Set();
+
+// Get package dependents
+function getDependents (name) {
+  PackageDependents(name).then(packages => {
+    packages.forEach(c => {
+      // If the name has not appear again increase the counter
+      if (!nameSet.has(c.name)){
+        nameSet.add(c.name);
+        counter++;
+        getDependents(c.name);
+      }
+    })
+  })
+}
+
+
 // parse args
 function parse_args(argv) {
     type = argv['type'] || 'npm'
@@ -58,17 +78,18 @@ function write_entry(obj) {
 
 // fetch the dependents if they do not exist in the hashmap
 function get_dependents(pkg_name) {
-    var db_req = request('GET', db_url + pkg_name)
-    const db_xd = cheerio.load(db_req.body)
-    let dat = db_xd('#package-tab-dependents > span:nth-child(1)').text()//.replace(',', '').replace("Dependents", "")
-    if (dat === '') {
-        return "UNDEFINED PKG"
-    }
-    return dat
+    // if the package exists, fetch it
+    if (deps_count[pkg_name] !== undefined)
+        return deps_count[pkg_name]
+    // else perform a request and fetch it
+    counter = 0
+    getDependents('"' + pkg_name + '"')
+    deps_count[pkg_name] = counter
+    return counter
 }
 
 async function dependencies(pkg_name) {
-    let res = "Failed to fetch deps"
+    let res = "Error"
     try {
         res = await get_dependencies.getByName(pkg_name)
     } 
@@ -77,6 +98,8 @@ async function dependencies(pkg_name) {
     return res
 }
 
+let todo_tasks = 0
+let total_tasks = 0
 function iterate_child($, ctx, child, pn, index) {
     let obj = {}
     var fields = $(ctx).children();
@@ -92,10 +115,14 @@ function iterate_child($, ctx, child, pn, index) {
     obj.discovery_date  = $(fields[3]).text().trim()
     obj.page            = pn
     obj.id = index
+    todo_tasks++
+    total_tasks++
     dependencies(obj.pkg_name).then(function(result) {
-        obj.dependents = deps_count[obj.pkg_name] || get_dependents(obj.pkg_name)
-        deps_count[obj.pkg_name] = obj.dependents
-        //exploit_count[obj.exploit] = (exploit_count[obj.exploit] +1) || 1
+        // find dependents
+        obj.dependents = get_dependents(obj.pkg_name)
+        // calculate count of exploits 
+        exploit_count.set(obj.exploit, (exploit_count.get(obj.exploit) +1) || 1)
+        // find dependencies
         obj.dependencies = dependencies_count[obj.pkg_name] || '"' + result + '"'
         dependencies_count[obj.pkg_name] = obj.dependencies
         obj.c_bug = 'no'
@@ -106,6 +133,10 @@ function iterate_child($, ctx, child, pn, index) {
         else if (result.indexOf('node-addon-api') != -1)
             obj.c_bug = 'node-addon-api'
         write_entry(obj)
+        todo_tasks--
+        // are we done?
+        if (todo_tasks === 0)
+            finish()       
     })
 }
 
@@ -135,9 +166,8 @@ function parse_page(pn, t) {
 function parse_all_pages(start_page, page_to_search, type) {
     let page_num = start_page
     // parse until we hit the requested number of pages
-    while (page_num < page_to_search) {
+    for (let i = start_page; i < page_to_search; i++) 
         parse_page(page_num++, type)
-    }
 }
 
 let argv = minimist(process.argv.slice(2));
@@ -146,7 +176,14 @@ if (filters.length === 0)
     filters = undefined
 print("Applying filters:", JSON.stringify(filters))
 parse_all_pages(start_page, page_to_search + start_page, type)
-console.log("Parsing completed");
-//for (let i in exploit_count) {
-//    print(i +":" + exploit_count[i])
-//}
+function finish() {
+    log_stream.write("\nPrinting Stats")
+    let ec = new Map([...exploit_count.entries()].sort((a, b) => b[1] - a[1]));
+    for (let i of ec.entries()) {
+        var num = i[1] / total_tasks * 100
+        let s = String("\n" + i[0] + ' ' + parseFloat(num).toFixed(4) + "%")
+        //console.log(s)
+        log_stream.write(s)
+    }
+    log_stream.end()
+}
