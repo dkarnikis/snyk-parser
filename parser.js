@@ -23,7 +23,7 @@ function parse_args(argv) {
     if (!argv['wo_headers'])
         log_stream.write("Severity" + sep + "CVE" + sep + "Vulnerability" + sep + "Plugin URL" + sep +
             "Affected Plugin" + sep + "Affected Version" + sep + "Database" + sep + "Discovery Date" 
-            + sep + "#Dependents" + sep + "#Page" + sep + "Id" + sep + "C_BUG" + sep + "Dependencies\n")
+            + sep + "#Dependents" + sep + "#Page" + sep + "C_BUG" + sep + "Dependencies\n")
     filters = {}
     filters.exploit = argv['exploit']
     filters.version = argv['version']
